@@ -244,7 +244,9 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
         path = pathlib.Path(path)
         files = sorted([file for ext in IMAGE_EXTENSIONS
                        for file in path.glob('*.{}'.format(ext))])
-        filehash = get_files_hash(files)
+        basenames = [os.path.basename(file_path) for file_path in files]
+
+        filehash = get_files_hash(basenames)
         npz_filename = f"{filehash}.npz"
 
         if no_cache:
@@ -253,7 +255,7 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
         else:
             if os.path.exists(npz_filename):
                 print(f"For dataset {path}, cache has been used.")
-                with np.load(path) as f:
+                with np.load(npz_filename) as f:
                     m, s = f['mu'][:], f['sigma'][:]
             else:
                 m, s = calculate_activation_statistics(files, model, batch_size,
