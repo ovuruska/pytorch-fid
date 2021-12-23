@@ -34,6 +34,7 @@ limitations under the License.
 import os
 import pathlib
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+import hashlib
 
 import numpy as np
 import torch
@@ -52,7 +53,7 @@ except ImportError:
 from pytorch_fid.inception import InceptionV3
 
 parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-parser.add_argument('--batch-size', type=int, default=50,
+parser.add_argument('--batch-size', type=int, default=1,
                     help='Batch size to use')
 parser.add_argument('--num-workers', type=int,
                     help=('Number of processes to use for data loading. '
@@ -66,6 +67,8 @@ parser.add_argument('--dims', type=int, default=2048,
 parser.add_argument('path', type=str, nargs=2,
                     help=('Paths to the generated images or '
                           'to .npz statistic files'))
+
+parser.add_argument("--no-cache",default=False,action="store_true")
 
 IMAGE_EXTENSIONS = {'bmp', 'jpg', 'jpeg', 'pgm', 'png', 'ppm',
                     'tif', 'tiff', 'webp'}
@@ -87,7 +90,7 @@ class ImagePathDataset(torch.utils.data.Dataset):
         return img
 
 
-def get_activations(files, model, batch_size=50, dims=2048, device='cpu',
+def get_activations(files, model, batch_size=1, dims=2048, device='cpu',
                     num_workers=1):
     """Calculates the activations of the pool_3 layer for all images.
 
@@ -228,8 +231,12 @@ def calculate_activation_statistics(files, model, batch_size=50, dims=2048,
     return mu, sigma
 
 
+def get_files_hash(files):
+    
+    return hashlib.sha256(str(files).encode()).hexdigest()
+
 def compute_statistics_of_path(path, model, batch_size, dims, device,
-                               num_workers=1):
+                               num_workers=1,no_cache=False):
     if path.endswith('.npz'):
         with np.load(path) as f:
             m, s = f['mu'][:], f['sigma'][:]
@@ -237,13 +244,27 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
         path = pathlib.Path(path)
         files = sorted([file for ext in IMAGE_EXTENSIONS
                        for file in path.glob('*.{}'.format(ext))])
-        m, s = calculate_activation_statistics(files, model, batch_size,
+        filehash = get_files_hash(files)
+        npz_filename = f"{filehash}.npz"
+
+        if no_cache:
+            m, s = calculate_activation_statistics(files, model, batch_size,
                                                dims, device, num_workers)
+        else:
+            if os.path.exists(npz_filename):
+                print(f"For dataset {path}, cache has been used.")
+                with np.load(path) as f:
+                    m, s = f['mu'][:], f['sigma'][:]
+            else:
+                m, s = calculate_activation_statistics(files, model, batch_size,
+                                                dims, device, num_workers)
+                np.savez(npz_filename, mu=m, sigma=s)
+       
 
     return m, s
 
 
-def calculate_fid_given_paths(paths, batch_size, device, dims, num_workers=1):
+def calculate_fid_given_paths(paths, batch_size, device, dims, num_workers=1,no_cache=False):
     """Calculates the FID of two paths"""
     for p in paths:
         if not os.path.exists(p):
@@ -254,9 +275,9 @@ def calculate_fid_given_paths(paths, batch_size, device, dims, num_workers=1):
     model = InceptionV3([block_idx]).to(device)
 
     m1, s1 = compute_statistics_of_path(paths[0], model, batch_size,
-                                        dims, device, num_workers)
+                                        dims, device, num_workers,no_cache=no_cache)
     m2, s2 = compute_statistics_of_path(paths[1], model, batch_size,
-                                        dims, device, num_workers)
+                                        dims, device, num_workers,no_cache=no_cache)
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
 
     return fid_value
@@ -271,16 +292,18 @@ def main():
         device = torch.device(args.device)
 
     if args.num_workers is None:
-        num_avail_cpus = len(os.sched_getaffinity(0))
+        import multiprocessing
+        num_avail_cpus = multiprocessing.cpu_count()
         num_workers = min(num_avail_cpus, 8)
     else:
         num_workers = args.num_workers
-
+    
     fid_value = calculate_fid_given_paths(args.path,
                                           args.batch_size,
                                           device,
                                           args.dims,
-                                          num_workers)
+                                          num_workers,
+                                          no_cache=args.no_cache)
     print('FID: ', fid_value)
 
 
