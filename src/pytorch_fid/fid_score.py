@@ -265,7 +265,7 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
             else:
                 m, s = calculate_activation_statistics(files, model, batch_size,
                                                 dims, device, num_workers)
-                np.savez(npz_filename, mu=m, sigma=s)
+                np.savez(npz_filepath, mu=m, sigma=s)
        
 
     return m, s
