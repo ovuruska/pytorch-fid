@@ -42,6 +42,7 @@ import torchvision.transforms as TF
 from PIL import Image
 from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
+from appdirs import user_cache_dir
 
 try:
     from tqdm import tqdm
@@ -244,7 +245,7 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
         path = pathlib.Path(path)
         files = sorted([file for ext in IMAGE_EXTENSIONS
                        for file in path.glob('*.{}'.format(ext))])
-        basenames = [os.path.basename(file_path) for file_path in files]
+        basenames = [f"{os.path.basename(file_path)}_{os.path.getsize(file_path)}" for file_path in files]
 
         filehash = get_files_hash(basenames)
         npz_filename = f"{filehash}.npz"
@@ -253,9 +254,13 @@ def compute_statistics_of_path(path, model, batch_size, dims, device,
             m, s = calculate_activation_statistics(files, model, batch_size,
                                                dims, device, num_workers)
         else:
-            if os.path.exists(npz_filename):
+           
+            cache_directory = user_cache_dir("pytorch_fid")
+            pathlib.Path(cache_directory).mkdir(parents=True, exist_ok=True)
+            npz_filepath = os.path.join(cache_directory,npz_filename)
+            if os.path.exists(npz_filepath):
                 print(f"For dataset {path}, cache has been used.")
-                with np.load(npz_filename) as f:
+                with np.load(npz_filepath) as f:
                     m, s = f['mu'][:], f['sigma'][:]
             else:
                 m, s = calculate_activation_statistics(files, model, batch_size,
